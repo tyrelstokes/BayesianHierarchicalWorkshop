@@ -1,9 +1,11 @@
 library(tidyverse)
 
 #### Load the data
+## Skip this section, file not in github, too large
 fts <- read.csv("free_throws.csv")
 
 ##### Clean data and organize into player season format
+##### Skip this section
 fts$attempt <- 1
 
 fts_player_season <- fts %>% group_by(player,season) %>% summarise(attempts = sum(attempt),makes = sum(shot_made))
@@ -12,6 +14,8 @@ fts_player_season <- fts_player_season %>% mutate(made_pct = makes/attempts)
 
 ###### Going to use only the 2014-15 and 2015-16 seasons for training
 ###### and predicting respectively
+
+fts_player_season <- readRDS("fts_player_season.Rds")
 
 fts_ps_16 <- fts_player_season %>% filter(season =="2014 - 2015")
 fts_ps_15 <- fts_player_season %>% filter(season == "2015 - 2016")

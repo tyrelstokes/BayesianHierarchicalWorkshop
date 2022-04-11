@@ -17,8 +17,8 @@ fts_player_season <- fts_player_season %>% mutate(made_pct = makes/attempts)
 
 fts_player_season <- readRDS("fts_player_season.Rds")
 
-fts_ps_16 <- fts_player_season %>% filter(season =="2014 - 2015")
-fts_ps_15 <- fts_player_season %>% filter(season == "2015 - 2016")
+fts_ps_15 <- fts_player_season %>% filter(season =="2014 - 2015")
+fts_ps_16 <- fts_player_season %>% filter(season == "2015 - 2016")
 
 #######
 #######

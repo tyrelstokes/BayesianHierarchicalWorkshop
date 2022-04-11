@@ -49,7 +49,7 @@ stan_data_re <- list(n_train = nrow(fts_ps_15),n_test = nrow(fts_ps_16), y = fts
                     y_test = fts_ps_16$makes, Attempts = fts_ps_15$attempts, Attempts_test = fts_ps_16$attempts,
                     player_training_int = fts_ps_15$player_id, player_test_int = fts_ps_16$player_id,
                     in_training = fts_ps_16$in_training,np = nrow(fts_ps_15),
-                    tau_std_prior = 3, mu_std_prior = 5)
+                    tau_std_prior = 2, mu_std_prior = 1)
 
 library(rstan)
 
@@ -64,19 +64,32 @@ fit_re <- stan("free_throw_re.stan",data = stan_data_re,chains = 4, iter = 2500)
 
 pred_probs <-  as.data.frame(summary(fit_re,pars = "predicted_probability")[1]$summary)
 pred_probs$player_id <-fts_ps_16$player_id
+pred_probs$mean_rank <- rank(-pred_probs$mean)
 
 fts_ps_16$predicted_mean_prob <- pred_probs[,1]
 fts_ps_16$predicted_q2p5_prob <- pred_probs[,4]
 fts_ps_16$predicted_q975_prob <- pred_probs[,8]
 
+##########################################################
+##########################################################
+
+error <- as.data.frame(summary(fit_re,pars = "error")[1]$summary)
+
+rmse <- sqrt(mean(error$mean^2))
+
+rmse_2 <- sqrt(mean(error$mean[fts_ps_16$in_training==1]^2))
+
+
+
 
 #################################
 library(posterior)
 library(ggridges)
+library(rstan)
 
 ###############3
 ## Average probability + between player variance plot
-draws <- as_draws_df(extract(fit_re,pars = c("avg_prob","tau")))
+draws <- as_draws_df(rstan::extract(fit_re,pars = c("avg_prob","tau")))
 
 pdf <- draws %>% pivot_longer(cols = c("avg_prob","tau"))
 
@@ -85,7 +98,7 @@ p1
 
 #################
 ## Prediction for unseen player
-draws2 <-as.data.frame(extract(fit_re,pars = c("predicted_probability")))
+draws2 <-as.data.frame(rstan::extract(fit_re,pars = c("predicted_probability")))
 
 p2 <- draws2 %>% ggplot(aes(x = predicted_probability.1))+geom_density(fill = "dodgerblue",alpha = .5)+
   geom_vline(xintercept = fts_ps_16$predicted_q2p5_prob[1])+geom_vline(xintercept = fts_ps_16$predicted_q975_prob[1])
@@ -93,7 +106,7 @@ p2+ xlab("Predicted Probability for unseen Player")
 
 ######################
 ## Compare said predictions to distribution of actual results
-df1 <- data.frame(value = draws2[,1],name = "Predicted Density", weight = 1)
+df1 <- data.frame(value = draws2[,new_players_inds[1]],name = "Predicted Density", weight = 1)
 df2 <- data.frame(value = fts_ps_16$made_pct[fts_ps_16$in_training ==0], name = "actual results",
                   weight = fts_ps_16$attempts[fts_ps_16$in_training ==0]/sum(fts_ps_16$attempts[fts_ps_16$in_training ==0]))
 df3 <- data.frame(value = fts_ps_16$made_pct[fts_ps_16$in_training ==1], name = "actual results,observed group",
@@ -116,13 +129,75 @@ stan_data_fe <- list(n_train = nrow(fts_ps_15),n_test = nrow(fts_ps_16), y = fts
      y_test = fts_ps_16$makes, Attempts = fts_ps_15$attempts, Attempts_test = fts_ps_16$attempts,
      player_training_int = fts_ps_15$player_id, player_test_int = fts_ps_16$player_id,
      in_training = fts_ps_16$in_training,np = nrow(fts_ps_15),
-     fe_std_prior = 5)
+     fe_std_prior = 2)
 
 fit_fe <- stan("free_throw_fe.stan",data = stan_data_fe,chains = 4, iter = 2500)
 
+
+
+######
+## FE Model Quantities
 pred_probs_fe <-   as.data.frame(summary(fit_fe,pars = "predicted_probability")[1]$summary)
 
 pred_probs_fe$player_id <- fts_ps_16$player_id
+
+error_fe <- as.data.frame(summary(fit_fe,pars = "error")[1]$summary)
+
+rmse_fe <- sqrt(mean(error_fe$mean[fts_ps_16$in_training==1]^2))
+#############
+### Quick Model Comparison using approximate Leave-One-Out Cross-Validation
+
+library(loo)
+log_lik_re <- extract_log_lik(fit_re,merge_chains =F)
+r_eff_re <- relative_eff(exp(log_lik_re),cores = 4)
+loo_re <- loo(log_lik_re,r_eff = r_eff_re,cores = 4)
+
+log_lik_fe <- extract_log_lik(fit_fe,merge_chains =F) 
+r_eff_fe <- relative_eff(exp(log_lik_fe),cores = 4)
+loo_fe <- loo(log_lik_fe,r_eff = r_eff_fe,cores = 4)
+
+
+comp <- loo_compare(loo_re,loo_fe )
+comp
+
+
+########################################
+########################################
+## Calibration plot comparison## Make graphs
+library(ggpubr)
+pred_probs <- as.data.frame(summary(fit_re,pars = "predicted_probability")[1]$summary)
+pred_probs$player_id <-fts_ps_16$player_id
+pred_probs$actual <- fts_ps_16$made_pct
+pred_probs$attempts <- fts_ps_16$attempts
+
+pred_probs_fe <- as.data.frame(summary(fit_fe,pars = "predicted_probability")[1]$summary)
+pred_probs_fe$player_id <-fts_ps_16$player_id
+pred_probs_fe$actual <- fts_ps_16$made_pct
+pred_probs_fe$attempts <- fts_ps_16$attempts
+
+calib <- pred_probs%>% ggplot(aes(x = mean,y=actual)) + geom_smooth(aes(weight = attempts))+
+  geom_abline(intercept =0,slope =1,col = "red")+ylab("Actual percentage")+xlab("Predicted Probability")
+
+hist <- pred_probs %>% ggplot(aes(x = mean)) + geom_histogram()+xlab("Predicted Probability")
+
+
+calib2 <- pred_probs%>%filter(player_id %in% fts_ps_16$player_id[fts_ps_16$in_training==1])%>%
+  ggplot(aes(x = mean,y=actual)) + geom_smooth(aes(weight = attempts))+
+  geom_abline(intercept =0,slope =1,col = "red")+ylab("Actual percentage")+xlab("Predicted Probability")
+
+hist2 <- pred_probs %>%filter(player_id %in% fts_ps_16$player_id[fts_ps_16$in_training==1])%>%
+  ggplot(aes(x = mean)) + geom_histogram()+xlab("Predicted Probability")
+
+
+calib_fe <- pred_probs_fe%>% ggplot(aes(x = mean,y=actual)) + geom_smooth(aes(weight = attempts))+
+  geom_abline(intercept =0,slope =1,col = "red")+ylab("Actual percentage")+xlab("Predicted Probability")
+
+hist_fe <- pred_probs_fe %>% ggplot(aes(x = mean)) + geom_histogram()+xlab("Predicted Probability")
+
+
+ggarrange(calib,hist,ncol=1, heights = c(2.5,1))
+ggarrange(calib2,hist2,ncol=1, heights = c(2.5,1))
+ggarrange(calib_fe,hist_fe,ncol=1, heights = c(2.5,1))
 
 
 ################################
@@ -236,14 +311,21 @@ pred_probs_fe_vague$player_id <-fts_ps_16$player_id
 pred_probs_fe_vague$actual <- fts_ps_16$made_pct
 pred_probs_fe_vague$attempts <- fts_ps_16$attempts
 
-calib_fe <- pred_probs_fe_vague %>% ggplot(aes(x = mean,y=actual)) + geom_smooth(aes(weight = attempts))+
+calib_vague <- pred_probs_vague %>% ggplot(aes(x = mean,y=actual)) + geom_smooth(aes(weight = attempts))+
   geom_abline(intercept =0,slope =1,col = "red")+ylab("Actual percentage")+xlab("Predicted Probability")
 
-hist_fe <- pred_probs_fe_vague %>% ggplot(aes(x = mean)) + geom_histogram()+xlab("Predicted Probability")
+hist_vague <- pred_probs_vague %>% ggplot(aes(x = mean)) + geom_histogram()+xlab("Predicted Probability")
 
 
-ggarrange(calib_fe,hist_fe,ncol=1, heights = c(2.5,1))
 
+calib_vague_fe <- pred_probs_fe_vague %>% ggplot(aes(x = mean,y=actual)) + geom_smooth(aes(weight = attempts))+
+  geom_abline(intercept =0,slope =1,col = "red")+ylab("Actual percentage")+xlab("Predicted Probability")
+
+hist_vague_fe <- pred_probs_fe_vague %>% ggplot(aes(x = mean)) + geom_histogram()+xlab("Predicted Probability")
+
+
+ggarrange(calib_vague,hist_vague,ncol=1, heights = c(2.5,1))
+ggarrange(calib_vague_fe,hist_vague_fe,ncol=1, heights = c(2.5,1))
 
 ####################################
 ####################################

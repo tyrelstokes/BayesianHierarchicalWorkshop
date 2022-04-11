@@ -45,15 +45,21 @@ generated quantities{
   
   vector[n_test] predicted_makes;
   vector[n_test] predicted_probability;
-  
+  vector[n_test] error;
+  vector[n_train] log_lik;
 
   
   for(i in 1:n_test){
     if(in_training[i]==1){
       predicted_makes[i] = binomial_rng(Attempts_test[i],theta[player_test_int[i]]);
       predicted_probability[i] = theta[player_test_int[i]];
+       error[i] = y_test[i] - predicted_makes[i];
        }
     
+  }
+  
+    for(j in 1:n_train){
+    log_lik[j] = binomial_lpmf(y[j]|Attempts[j],theta[j]);
   }
 }
 

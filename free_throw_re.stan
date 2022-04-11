@@ -47,7 +47,8 @@ generated quantities{
   
   vector[n_test] predicted_makes;
   vector[n_test] predicted_probability;
-  
+  vector[n_test] error;
+  vector[n_train] log_lik;
   real avg_prob = 1/(1+exp(-mu));
   real mu_draw;
   
@@ -61,7 +62,12 @@ generated quantities{
       predicted_probability[i] = 1.0/(1.0+exp(-mu_draw));
       predicted_makes[i] = binomial_rng(Attempts_test[i],predicted_probability[i]);
     }
+    error[i] = y_test[i] - predicted_makes[i];
     
+  }
+  
+  for(j in 1:n_train){
+    log_lik[j] = binomial_lpmf(y[j]|Attempts[j],theta[j]);
   }
 }
 
